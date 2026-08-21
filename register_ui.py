@@ -9,7 +9,8 @@ import requests
 import threading
 
 # Configuración
-FACIAL_SERVICE = "http://127.0.0.1:8001"
+# FACIAL_SERVICE = "http://127.0.0.1:8001"
+FACIAL_SERVICE = "http://172.20.0.24:8001"
 DOCENTE_ID = 1
 POSICIONES = ["centro", "izquierda", "derecha", "arriba", "abajo", "sonrisa"]
 CAPTURAS_POR_POSICION = 9  # 9 x 6 = 54 capturas

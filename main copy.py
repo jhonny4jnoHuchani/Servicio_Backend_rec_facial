@@ -6,18 +6,16 @@ import cv2
 import numpy as np
 from io import BytesIO
 from PIL import Image
-from fastapi import FastAPI, File, UploadFile, Form, HTTPException, Request
+from fastapi import FastAPI, File, UploadFile, Form, HTTPException,Request
 from contextlib import asynccontextmanager
 
-from config import (
-    SERVICE_HOST, SERVICE_PORT, MIN_EMBEDDINGS_REQUIRED,
-    MAX_IMAGE_BYTES, MAX_EMBEDDINGS, POSICIONES_VALIDAS
-)
+from config import (SERVICE_HOST, SERVICE_PORT, MIN_EMBEDDINGS_REQUIRED,MAX_IMAGE_BYTES, MAX_EMBEDDINGS, POSICIONES_VALIDAS)
 from face_detector import FaceDetector
 from face_embedder import FaceEmbedder
 from face_comparator import find_best_match
 import database as db
 from liveness_detector import LivenessDetector
+
 
 
 # Carga global de modelos (una sola vez al iniciar)
@@ -54,11 +52,9 @@ def register(
         raise HTTPException(400, "Posición inválida.")
 
     # Tope máximo de embeddings
+    
     if db.count_embeddings(docente_id) >= MAX_EMBEDDINGS:
-        return {
-            "success": False,
-            "message": f"Ya alcanzó el máximo de {MAX_EMBEDDINGS} embeddings."
-        }
+        return {"success": False, "message": f"Ya alcanzó el máximo de {MAX_EMBEDDINGS} embeddings."}
 
     # Validar Content-Type
     if image.content_type not in ("image/jpeg", "image/png", "image/jpg"):
@@ -68,6 +64,7 @@ def register(
     contents = image.file.read()
 
     # Límite de tamaño
+    
     if len(contents) > MAX_IMAGE_BYTES:
         raise HTTPException(413, "Imagen demasiado grande. Máximo 5MB.")
 
@@ -95,7 +92,6 @@ def register(
 
     face_info = faces[0]
 
-    # Verificar liveness
     live_result = liveness.predict(frame, face_info)
     if not live_result["is_real"]:
         # Guardar imagen sospechosa
@@ -108,23 +104,24 @@ def register(
 
         db.save_log(docente_id, 0, "spoofing_detectado", liveness_score=live_result["score"])
         
-        return {
-            "success": False,
-            "message": "Posible suplantación detectada.",
-            "liveness_score": live_result["score"]
-        }
-
+        return {"success": False, "message": "Posible suplantación detectada.", "liveness_score": live_result["score"]}
     # Generar embedding
     try:
         embedding = embedder.extract(frame, face_info)
     except Exception as e:
         return {"success": False, "message": f"Error al extraer embedding: {str(e)}"}
 
+    # Obtener o crear registro en reconocimiento_facial
+    rec_id = db.get_or_create_reconocimiento(docente_id)
+
     # Calcular quality_score
     quality_score = round(float(face_info[14]), 3)
 
-    # Guardar embedding - CORREGIDO: solo pasamos docente_id, embedding, quality_score, posicion
-    db.save_embedding(docente_id, embedding, quality_score, posicion)
+    # Guardar embedding
+    db.save_embedding(docente_id, rec_id, embedding, quality_score, posicion)
+
+    # Actualizar estadísticas
+    db.update_reconocimiento_stats(docente_id)
 
     total = db.count_embeddings(docente_id)
     tiempo_ms = int((time.time() - start) * 1000)
@@ -185,7 +182,6 @@ def verify(
         return {"match": False, "resultado": "desconocido", "message": "Múltiples rostros detectados."}
 
     face_info = faces[0]
-    
     # Verificar liveness
     live_result = liveness.predict(frame, face_info)
 
@@ -198,17 +194,9 @@ def verify(
         filename = f"{sospechosa_dir}/spoof_{docente_id}_{datetime.now():%Y%m%d_%H%M%S}.jpg"
         cv2.imwrite(filename, frame)
         
-        db.save_log(
-            docente_id, 0, "spoofing_detectado",
-            liveness_score=live_result["score"],
-            ip_origen=request.client.host
-        )
-        return {
-            "match": False,
-            "resultado": "spoofing_detectado",
-            "message": "Posible suplantación detectada.",
-            "liveness_score": live_result["score"]
-        }
+        db.save_log(docente_id, 0, "spoofing_detectado", liveness_score=live_result["score"], ip_origen=request.client.host)
+        return {"match": False, "resultado": "spoofing_detectado", "message": "Posible suplantación detectada.", "liveness_score": live_result["score"]}
+
 
     # Generar embedding
     try:
@@ -229,13 +217,7 @@ def verify(
 
     # Guardar log
     resultado = "reconocido" if result["match"] else "desconocido"
-    db.save_log(
-        docente_id,
-        result["confidence"],
-        resultado,
-        tiempo_proceso_ms=tiempo_ms,
-        ip_origen=request.client.host
-    )
+    db.save_log(docente_id, result["confidence"], resultado, tiempo_proceso_ms=tiempo_ms, ip_origen=request.client.host)
 
     return {
         "match": result["match"],
