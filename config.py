@@ -25,8 +25,9 @@ SFACE_MODEL = str(MODELS_DIR / "face_recognition_sface_2021dec.onnx")
 DB_HOST     = os.getenv("DB_HOST", "127.0.0.1")
 DB_PORT     = os.getenv("DB_PORT", "5432")
 DB_NAME     = os.getenv("DB_NAME", "sistema_asistencia")
+# DB_NAME     = os.getenv("DB_NAME", "Utic_medicina")
 DB_USER     = os.getenv("DB_USER", "postgres")
-DB_PASSWORD = os.getenv("DB_PASSWORD", "postgres123")
+DB_PASSWORD = os.getenv("DB_PASSWORD", "8409238pg")
 
 # ── Umbrales de reconocimiento ────────────────────────────────────────
 COSINE_THRESHOLD   = 0.40    # Similitud coseno mínima (0-1)
