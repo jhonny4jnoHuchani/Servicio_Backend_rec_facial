@@ -20,7 +20,6 @@ import database as db
 from liveness_detector import LivenessDetector
 
 
-# Carga global de modelos (una sola vez al iniciar)
 detector = None
 embedder = None
 liveness = None
@@ -40,25 +39,35 @@ app = FastAPI(title="Servicio de Reconocimiento Facial", lifespan=lifespan)
 
 # ── Endpoints ──────────────────────────────────────────────────────
 
+@app.post("/register-persona")
+def register_persona(ci: str = Form(...)):
+    """Crea o busca una persona por CI. Retorna persona_id"""
+    persona_id = db.get_or_create_persona(ci)
+    return {"success": True, "persona_id": persona_id}
+
+
 @app.post("/register")
 def register(
-    docente_id: int = Form(...),
+    persona_id: int = Form(...),
+    ci: str = Form(...),
     posicion: str = Form(...),
     image: UploadFile = File(...)
 ):
-    """Registra un embedding facial para un docente."""
+    """Registra un embedding facial para una persona."""
     start = time.time()
+
+    # Validar persona
+    persona = db.get_persona_by_id(persona_id)
+    if not persona or persona["ci"] != ci:
+        return {"success": False, "message": "Persona no encontrada o CI no coincide."}
 
     # Validar posición
     if posicion not in POSICIONES_VALIDAS:
         raise HTTPException(400, "Posición inválida.")
 
     # Tope máximo de embeddings
-    if db.count_embeddings(docente_id) >= MAX_EMBEDDINGS:
-        return {
-            "success": False,
-            "message": f"Ya alcanzó el máximo de {MAX_EMBEDDINGS} embeddings."
-        }
+    if db.count_embeddings(persona_id) >= MAX_EMBEDDINGS:
+        return {"success": False, "message": f"Ya alcanzó el máximo de {MAX_EMBEDDINGS} embeddings."}
 
     # Validar Content-Type
     if image.content_type not in ("image/jpeg", "image/png", "image/jpg"):
@@ -77,7 +86,7 @@ def register(
         pil_img.verify()
         pil_img = Image.open(BytesIO(contents))
         if pil_img.format not in ("JPEG", "PNG"):
-            raise HTTPException(400, "Formato no soportado. Use JPG o PNG.")
+            raise HTTPException(400, "Formato no soportado.")
         frame = np.array(pil_img.convert("RGB"))
         frame = np.ascontiguousarray(frame[:, :, ::-1])
     except HTTPException:
@@ -98,21 +107,15 @@ def register(
     # Verificar liveness
     live_result = liveness.predict(frame, face_info)
     if not live_result["is_real"]:
-        # Guardar imagen sospechosa
         from pathlib import Path
         from datetime import datetime
         sospechosa_dir = Path("sospechosas")
         sospechosa_dir.mkdir(exist_ok=True)
-        filename = f"{sospechosa_dir}/spoof_register_{docente_id}_{datetime.now():%Y%m%d_%H%M%S}.jpg"
+        filename = f"{sospechosa_dir}/spoof_register_{persona_id}_{datetime.now():%Y%m%d_%H%M%S}.jpg"
         cv2.imwrite(filename, frame)
 
-        db.save_log(docente_id, 0, "spoofing_detectado", liveness_score=live_result["score"])
-        
-        return {
-            "success": False,
-            "message": "Posible suplantación detectada.",
-            "liveness_score": live_result["score"]
-        }
+        db.save_log(persona_id, 0, "spoofing_detectado", liveness_score=live_result["score"])
+        return {"success": False, "message": "Posible suplantación detectada.", "liveness_score": live_result["score"]}
 
     # Generar embedding
     try:
@@ -120,13 +123,10 @@ def register(
     except Exception as e:
         return {"success": False, "message": f"Error al extraer embedding: {str(e)}"}
 
-    # Calcular quality_score
     quality_score = round(float(face_info[14]), 3)
+    db.save_embedding(persona_id, embedding, quality_score, posicion)
 
-    # Guardar embedding - CORREGIDO: solo pasamos docente_id, embedding, quality_score, posicion
-    db.save_embedding(docente_id, embedding, quality_score, posicion)
-
-    total = db.count_embeddings(docente_id)
+    total = db.count_embeddings(persona_id)
     tiempo_ms = int((time.time() - start) * 1000)
 
     return {
@@ -141,22 +141,22 @@ def register(
 @app.post("/verify")
 def verify(
     request: Request,
-    docente_id: int = Form(...),
+    persona_id: int = Form(...),
+    ci: str = Form(...),
     image: UploadFile = File(...)
 ):
-    """Verifica un rostro contra los embeddings del docente."""
+    """Verifica un rostro contra los embeddings de una persona."""
     start = time.time()
-    
-    # Verificar si tiene suficientes embeddings
-    total = db.count_embeddings(docente_id)
-    if total < MIN_EMBEDDINGS_REQUIRED:
-        return {
-            "match": False,
-            "resultado": "desconocido",
-            "message": f"Registro facial incompleto. Tiene {total} de {MIN_EMBEDDINGS_REQUIRED} requeridos."
-        }
 
-    # Leer imagen
+    # Validar persona
+    persona = db.get_persona_by_id(persona_id)
+    if not persona or persona["ci"] != ci:
+        return {"match": False, "resultado": "desconocido", "message": "Persona no encontrada o CI no coincide."}
+
+    total = db.count_embeddings(persona_id)
+    if total < MIN_EMBEDDINGS_REQUIRED:
+        return {"match": False, "resultado": "desconocido", "message": f"Registro facial incompleto. Tiene {total} de {MIN_EMBEDDINGS_REQUIRED}."}
+
     if image.content_type not in ("image/jpeg", "image/png", "image/jpg"):
         raise HTTPException(400, "Formato de imagen no válido.")
 
@@ -166,7 +166,7 @@ def verify(
         pil_img.verify()
         pil_img = Image.open(BytesIO(contents))
         if pil_img.format not in ("JPEG", "PNG"):
-            raise HTTPException(400, "Formato no soportado. Use JPG o PNG.")
+            raise HTTPException(400, "Formato no soportado.")
         frame = np.array(pil_img.convert("RGB"))
         frame = np.ascontiguousarray(frame[:, :, ::-1])
     except HTTPException:
@@ -174,68 +174,45 @@ def verify(
     except Exception:
         raise HTTPException(400, "No se pudo procesar la imagen.")
 
-    # Detectar rostro
     faces = detector.detect(frame)
     if faces is None:
-        db.save_log(docente_id, 0, "desconocido")
+        db.save_log(persona_id, 0, "desconocido")
         return {"match": False, "resultado": "desconocido", "message": "No se detectó rostro."}
 
     if len(faces) > 1:
-        db.save_log(docente_id, 0, "desconocido")
+        db.save_log(persona_id, 0, "desconocido")
         return {"match": False, "resultado": "desconocido", "message": "Múltiples rostros detectados."}
 
     face_info = faces[0]
-    
-    # Verificar liveness
-    live_result = liveness.predict(frame, face_info)
 
+    live_result = liveness.predict(frame, face_info)
     if not live_result["is_real"]:
-        # Guardar imagen sospechosa
         from pathlib import Path
         from datetime import datetime
         sospechosa_dir = Path("sospechosas")
         sospechosa_dir.mkdir(exist_ok=True)
-        filename = f"{sospechosa_dir}/spoof_{docente_id}_{datetime.now():%Y%m%d_%H%M%S}.jpg"
+        filename = f"{sospechosa_dir}/spoof_{persona_id}_{datetime.now():%Y%m%d_%H%M%S}.jpg"
         cv2.imwrite(filename, frame)
-        
-        db.save_log(
-            docente_id, 0, "spoofing_detectado",
-            liveness_score=live_result["score"],
-            ip_origen=request.client.host
-        )
-        return {
-            "match": False,
-            "resultado": "spoofing_detectado",
-            "message": "Posible suplantación detectada.",
-            "liveness_score": live_result["score"]
-        }
 
-    # Generar embedding
+        db.save_log(persona_id, 0, "spoofing_detectado", liveness_score=live_result["score"], ip_origen=request.client.host)
+        return {"match": False, "resultado": "spoofing_detectado", "message": "Posible suplantación detectada.", "liveness_score": live_result["score"]}
+
     try:
         embedding = embedder.extract(frame, face_info)
     except Exception as e:
         return {"match": False, "resultado": "desconocido", "message": str(e)}
 
-    # Cargar embeddings del docente
-    embeddings = db.get_embeddings_by_docente(docente_id)
+    embeddings = db.get_embeddings_by_persona(persona_id)
 
     if not embeddings:
-        db.save_log(docente_id, 0, "desconocido")
+        db.save_log(persona_id, 0, "desconocido")
         return {"match": False, "resultado": "desconocido", "message": "No hay embeddings registrados."}
 
-    # Comparar
     result = find_best_match(embedding, embeddings)
     tiempo_ms = int((time.time() - start) * 1000)
-
-    # Guardar log
     resultado = "reconocido" if result["match"] else "desconocido"
-    db.save_log(
-        docente_id,
-        result["confidence"],
-        resultado,
-        tiempo_proceso_ms=tiempo_ms,
-        ip_origen=request.client.host
-    )
+
+    db.save_log(persona_id, result["confidence"], resultado, tiempo_proceso_ms=tiempo_ms, ip_origen=request.client.host)
 
     return {
         "match": result["match"],
@@ -245,12 +222,12 @@ def verify(
     }
 
 
-@app.get("/status/{docente_id}")
-def status(docente_id: int):
-    """Estado del registro facial de un docente."""
-    info = db.get_reconocimiento_status(docente_id)
+@app.get("/status/{persona_id}")
+def status(persona_id: int):
+    """Estado del registro facial de una persona."""
+    info = db.get_reconocimiento_status(persona_id)
     return {
-        "docente_id": docente_id,
+        "persona_id": persona_id,
         "activo": info["activo"],
         "total_embeddings": info["total_embeddings"],
         "calidad_promedio": info["calidad_promedio"],
@@ -263,7 +240,6 @@ def health():
     return {"status": "ok", "service": "reconocimiento-facial"}
 
 
-# ── Inicio ─────────────────────────────────────────────────────────
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(app, host=SERVICE_HOST, port=SERVICE_PORT)

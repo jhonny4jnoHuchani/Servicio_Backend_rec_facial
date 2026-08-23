@@ -19,19 +19,12 @@ FRAME_HEIGHT = 480
 YUNET_MODEL = str(MODELS_DIR / "face_detection_yunet_2023mar.onnx")
 SFACE_MODEL = str(MODELS_DIR / "face_recognition_sface_2021dec.onnx")
 
-# ── Base de datos: sistema_asistencia (principal) ────────────────────
+# ── Base de datos: Servicio_reconocimiento (única que usa Python) ────
 DB_HOST     = os.getenv("DB_HOST", "127.0.0.1")
 DB_PORT     = os.getenv("DB_PORT", "5432")
-DB_NAME     = os.getenv("DB_NAME", "sistema_asistencia")
+DB_NAME     = os.getenv("DB_NAME", "Servicio_reconocimiento")
 DB_USER     = os.getenv("DB_USER", "postgres")
-DB_PASSWORD = os.getenv("DB_PASSWORD", "8409238pg")
-
-# ── Base de datos: Utic_medicina (secundaria) ───────────────────────
-DB2_HOST     = os.getenv("DB2_HOST", "127.0.0.1")
-DB2_PORT     = os.getenv("DB2_PORT", "5432")
-DB2_NAME     = os.getenv("DB2_NAME", "Utic_medicina")
-DB2_USER     = os.getenv("DB2_USER", "postgres")
-DB2_PASSWORD = os.getenv("DB2_PASSWORD", "8409238pg")
+DB_PASSWORD = os.getenv("DB_PASSWORD", "postgres123")
 
 # ── Umbrales de reconocimiento ────────────────────────────────────────
 COSINE_THRESHOLD   = 0.40
