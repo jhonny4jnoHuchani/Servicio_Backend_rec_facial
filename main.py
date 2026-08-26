@@ -18,19 +18,26 @@ from face_embedder import FaceEmbedder
 from face_comparator import find_best_match
 import database as db
 from liveness_detector import LivenessDetector
+from eyeglass_detector import EyeglassDetector
+from skin_texture_detector import SkinTextureDetector
 
 
 detector = None
 embedder = None
 liveness = None
+eyeglass_detector = None
+skin_detector = None
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    global detector, embedder, liveness
+    global detector, embedder, liveness, eyeglass_detector, skin_detector
     print("[INFO] Cargando modelos ONNX...")
     detector = FaceDetector()
     embedder = FaceEmbedder()
     liveness = LivenessDetector()
+    
+    eyeglass_detector = EyeglassDetector()
+    skin_detector = SkinTextureDetector()
     print("[INFO] Modelos cargados correctamente.")
     yield
 
@@ -117,6 +124,29 @@ def register(
         db.save_log(persona_id, 0, "spoofing_detectado", liveness_score=live_result["score"])
         return {"success": False, "message": "Posible suplantación detectada.", "liveness_score": live_result["score"]}
 
+    # Verificar lentes
+    print("[MAIN] Chequeando lentes...", flush=True)
+    has_eyeglass = eyeglass_detector.detect(frame, face_info)
+    print(f"[MAIN] Resultado lentes: {has_eyeglass}", flush=True)
+
+    if has_eyeglass:
+        return {
+            "match": False,
+            "resultado": "desconocido",
+            "message": "Por favor, quítese las gafas para la verificación.",
+            "eyeglass_detected": True
+        }
+
+
+    # Verificar textura de piel
+    print("[MAIN] Chequeando textura de piel...", flush=True)
+    is_skin = skin_detector.analyze(frame, face_info)
+    print(f"[MAIN] Resultado textura: {is_skin}", flush=True)
+
+    if not is_skin:
+        return {"success": False, "message": "No se detectó piel real.", "spoofing_detected": True}
+
+
     # Generar embedding
     try:
         embedding = embedder.extract(frame, face_info)
@@ -197,8 +227,26 @@ def verify(
         db.save_log(persona_id, 0, "spoofing_detectado", liveness_score=live_result["score"], ip_origen=request.client.host)
         return {"match": False, "resultado": "spoofing_detectado", "message": "Posible suplantación detectada.", "liveness_score": live_result["score"]}
 
+    # Verificar lentes
+    print("[MAIN] Chequeando lentes...", flush=True)
+    has_eyeglass = eyeglass_detector.detect(frame, face_info)
+    print(f"[MAIN] Resultado lentes: {has_eyeglass}", flush=True)
+
+    if has_eyeglass:
+        return {"success": False, "message": "Por favor, quítese las gafas para el registro.", "eyeglass_detected": True}
+
+    # Verificar textura de piel
+    print("[MAIN] Chequeando textura de piel...", flush=True)
+    is_skin = skin_detector.analyze(frame, face_info)
+    print(f"[MAIN] Resultado textura: {is_skin}", flush=True)
+
+    if not is_skin:
+        return {"match": False, "resultado": "spoofing_detectado", "message": "No se detectó piel real.", "spoofing_detected": True}
+
     try:
         embedding = embedder.extract(frame, face_info)
+
+    
     except Exception as e:
         return {"match": False, "resultado": "desconocido", "message": str(e)}
 

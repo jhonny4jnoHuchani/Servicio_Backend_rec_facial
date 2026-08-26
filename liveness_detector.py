@@ -39,8 +39,11 @@ class LivenessDetector:
         return e / e.sum()
 
     def predict(self, frame, face_info):
+        print("[LIVENESS] Iniciando análisis...", flush=True)
+        
         face = self._crop_with_scale(frame, face_info)
         if face is None:
+            print("[LIVENESS] No se pudo recortar rostro", flush=True)
             return {"is_real": False, "score": 0.0}
 
         face = face.astype(np.float32) / 255.0
@@ -52,8 +55,10 @@ class LivenessDetector:
             output = self._model.forward()
 
         probs = self._softmax(output[0])
-        print(f"PROBS: [0]={probs[0]:.4f} [1]={probs[1]:.4f} [2]={probs[2]:.4f} | Usando índice {REAL_CLASS_INDEX}={probs[REAL_CLASS_INDEX]:.4f}")
         score = float(probs[REAL_CLASS_INDEX])
+        
+        print(f"[LIVENESS] Score real={score:.4f} | Fake1={probs[0]:.4f} | Fake2={probs[1]:.4f} | Umbral={LIVENESS_THRESHOLD}", flush=True)
+        print(f"[LIVENESS] Resultado: {'✅ REAL' if score >= LIVENESS_THRESHOLD else '❌ SPOOFING (foto/pantalla)'}", flush=True)
 
         return {
             "is_real": score >= LIVENESS_THRESHOLD,

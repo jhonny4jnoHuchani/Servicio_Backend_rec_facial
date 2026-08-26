@@ -13,7 +13,8 @@ Microservicio Python (FastAPI) para reconocimiento facial.
 ### 2. Crear entorno virtual
 ```
 python -m venv venv
-venv\Scripts\activate # Windows
+venv\Scripts\activate 
+# Windows
 ```
 
 ### 3. Instalar dependencias

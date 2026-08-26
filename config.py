@@ -46,3 +46,7 @@ POSICIONES_VALIDAS = {"centro", "izquierda", "derecha", "arriba", "abajo", "sonr
 # ── Liveness ──────────────────────────────────────────────────────────
 ANTI_SPOOF_MODEL = str(MODELS_DIR / "2.7_80x80_MiniFASNetV2.onnx")
 LIVENESS_THRESHOLD = 0.5
+
+# ── Detección de lentes ──────────────────────────────────────────
+EYEGLASS_DETECTION_ENABLED = True
+EYEGLASS_THRESHOLD = 0.7
