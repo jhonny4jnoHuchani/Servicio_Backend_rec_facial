@@ -33,14 +33,14 @@ MIN_BRIGHTNESS     = 40
 MAX_BLUR_VARIANCE  = 100.0
 
 # ── Registro ──────────────────────────────────────────────────────────
-MIN_EMBEDDINGS_REQUIRED = 50
+MIN_EMBEDDINGS_REQUIRED = 70
 
 # ── Servicio ──────────────────────────────────────────────────────────
 SERVICE_HOST = os.getenv("SERVICE_HOST", "0.0.0.0")
 SERVICE_PORT = int(os.getenv("SERVICE_PORT", "8001"))
 
 MAX_IMAGE_BYTES = 5 * 1024 * 1024
-MAX_EMBEDDINGS  = 60
+MAX_EMBEDDINGS  = 80
 POSICIONES_VALIDAS = {"centro", "izquierda", "derecha", "arriba", "abajo", "sonrisa"}
 
 # ── Liveness ──────────────────────────────────────────────────────────
