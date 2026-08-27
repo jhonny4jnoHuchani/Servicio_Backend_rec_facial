@@ -19,25 +19,26 @@ from face_comparator import find_best_match
 import database as db
 from liveness_detector import LivenessDetector
 from eyeglass_detector import EyeglassDetector
-from skin_texture_detector import SkinTextureDetector
-
+from gesture_detector import GestureDetector
+from config import GESTOS_VALIDOS
 
 detector = None
 embedder = None
 liveness = None
 eyeglass_detector = None
-skin_detector = None
+gesture_detector = None
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    global detector, embedder, liveness, eyeglass_detector, skin_detector
+    global detector, embedder, liveness, eyeglass_detector, gesture_detector
     print("[INFO] Cargando modelos ONNX...")
     detector = FaceDetector()
     embedder = FaceEmbedder()
     liveness = LivenessDetector()
-    
+    gesture_detector = GestureDetector()
     eyeglass_detector = EyeglassDetector()
-    skin_detector = SkinTextureDetector()
+    
     print("[INFO] Modelos cargados correctamente.")
     yield
 
@@ -138,18 +139,11 @@ def register(
         }
 
 
-    # Verificar textura de piel
-    print("[MAIN] Chequeando textura de piel...", flush=True)
-    is_skin = skin_detector.analyze(frame, face_info)
-    print(f"[MAIN] Resultado textura: {is_skin}", flush=True)
-
-    if not is_skin:
-        return {"success": False, "message": "No se detectó piel real.", "spoofing_detected": True}
-
-
     # Generar embedding
     try:
         embedding = embedder.extract(frame, face_info)
+
+        
     except Exception as e:
         return {"success": False, "message": f"Error al extraer embedding: {str(e)}"}
 
@@ -173,7 +167,9 @@ def verify(
     request: Request,
     persona_id: int = Form(...),
     ci: str = Form(...),
-    image: UploadFile = File(...)
+    gesto_solicitado: str = Form(...),
+    foto_frontal: UploadFile = File(...),
+    foto_gesto: UploadFile = File(...)
 ):
     """Verifica un rostro contra los embeddings de una persona."""
     start = time.time()
@@ -187,10 +183,10 @@ def verify(
     if total < MIN_EMBEDDINGS_REQUIRED:
         return {"match": False, "resultado": "desconocido", "message": f"Registro facial incompleto. Tiene {total} de {MIN_EMBEDDINGS_REQUIRED}."}
 
-    if image.content_type not in ("image/jpeg", "image/png", "image/jpg"):
+    if foto_frontal.content_type not in ("image/jpeg", "image/png", "image/jpg"):
         raise HTTPException(400, "Formato de imagen no válido.")
 
-    contents = image.file.read()
+    contents = foto_frontal.file.read()
     try:
         pil_img = Image.open(BytesIO(contents))
         pil_img.verify()
@@ -235,13 +231,47 @@ def verify(
     if has_eyeglass:
         return {"success": False, "message": "Por favor, quítese las gafas para el registro.", "eyeglass_detected": True}
 
-    # Verificar textura de piel
-    print("[MAIN] Chequeando textura de piel...", flush=True)
-    is_skin = skin_detector.analyze(frame, face_info)
-    print(f"[MAIN] Resultado textura: {is_skin}", flush=True)
+    # Procesar foto_gesto
+    contents_gesto = foto_gesto.file.read()
+    try:
+        pil_gesto = Image.open(BytesIO(contents_gesto))
+        pil_gesto.verify()
+        pil_gesto = Image.open(BytesIO(contents_gesto))
+        if pil_gesto.format not in ("JPEG", "PNG"):
+            raise HTTPException(400, "Formato no soportado.")
+        frame_gesto = np.ascontiguousarray(np.array(pil_gesto.convert("RGB"))[:, :, ::-1])
+    except HTTPException:
+        raise
+    except Exception:
+        raise HTTPException(400, "No se pudo procesar la foto de gesto.")
 
-    if not is_skin:
-        return {"match": False, "resultado": "spoofing_detectado", "message": "No se detectó piel real.", "spoofing_detected": True}
+    # Detectar rostro en foto_gesto
+    faces_gesto = detector.detect(frame_gesto)
+    if faces_gesto is None:
+        db.save_log(persona_id, 0, "desconocido", ip_origen=request.client.host)
+        return {"match": False, "resultado": "desconocido", "message": "No se detectó rostro en foto de gesto."}
+
+    # Verificar liveness en foto_gesto
+    live_result_gesto = liveness.predict(frame_gesto, faces_gesto[0])
+    if not live_result_gesto["is_real"]:
+        db.save_log(persona_id, 0, "spoofing_detectado",
+                    liveness_score=live_result_gesto["score"],
+                    ip_origen=request.client.host)
+        return {
+            "match": False,
+            "resultado": "spoofing_detectado",
+            "message": "Posible suplantación detectada en la foto de gesto.",
+            "liveness_score": live_result_gesto["score"]
+        }
+
+    # Verificar gesto
+    print(f"[MAIN] Verificando gesto: {gesto_solicitado}...", flush=True)
+    gesto_ok = gesture_detector.verify(faces[0], faces_gesto[0], gesto_solicitado)
+    print(f"[MAIN] Resultado gesto: {gesto_ok}", flush=True)
+
+    if not gesto_ok:
+        db.save_log(persona_id, 0, "spoofing_detectado", ip_origen=request.client.host)
+        return {"match": False, "resultado": "spoofing_detectado", "message": "El gesto no coincide.", "gesture_detected": False}
 
     try:
         embedding = embedder.extract(frame, face_info)

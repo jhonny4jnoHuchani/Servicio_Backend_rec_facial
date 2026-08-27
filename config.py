@@ -50,3 +50,6 @@ LIVENESS_THRESHOLD = 0.5
 # ── Detección de lentes ──────────────────────────────────────────
 EYEGLASS_DETECTION_ENABLED = True
 EYEGLASS_THRESHOLD = 0.7
+
+# ── Gestos ─────────────────────────────────────────────────────────
+GESTOS_VALIDOS = {"arriba", "abajo", "izquierda", "derecha", "sonrisa"}
