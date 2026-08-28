@@ -105,6 +105,7 @@ def register(
     # Detectar rostro
     faces = detector.detect(frame)
     if faces is None:
+        print(f"[REGISTER] Falló: no detectó rostro (persona_id={persona_id})", flush=True)
         return {"success": False, "message": "No se detectó ningún rostro."}
 
     if len(faces) > 1:

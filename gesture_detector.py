@@ -24,7 +24,7 @@ class GestureDetector:
     # --- Umbrales: punto de partida, deben ajustarse con datos reales ---
     MIN_DETECTION_SCORE = 0.5   # confianza mínima de YuNet en ambas fotos
     UMBRAL_VERTICAL = 0.15       # cambio mínimo en proporción nariz/ojos-boca
-    UMBRAL_ASIMETRIA = 0.20      # cambio mínimo en razón nariz-ojoD / nariz-ojoI
+    UMBRAL_ASIMETRIA = 0.12      # cambio mínimo en razón nariz-ojoD / nariz-ojoI
     UMBRAL_SONRISA = 0.15        # crecimiento mínimo relativo del ancho de boca
 
     def verify(self, frontal_face, gesto_face, gesto_solicitado):
