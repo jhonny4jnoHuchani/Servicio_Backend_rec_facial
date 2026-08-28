@@ -24,7 +24,7 @@ DB_HOST     = os.getenv("DB_HOST", "127.0.0.1")
 DB_PORT     = os.getenv("DB_PORT", "5432")
 DB_NAME     = os.getenv("DB_NAME", "Servicio_reconocimiento")
 DB_USER     = os.getenv("DB_USER", "postgres")
-DB_PASSWORD = os.getenv("DB_PASSWORD", "postgres123")
+DB_PASSWORD = os.getenv("DB_PASSWORD", "8409238pg")
 
 # ── Umbrales de reconocimiento ────────────────────────────────────────
 COSINE_THRESHOLD   = 0.40
@@ -47,9 +47,53 @@ POSICIONES_VALIDAS = {"centro", "izquierda", "derecha", "arriba", "abajo", "sonr
 ANTI_SPOOF_MODEL = str(MODELS_DIR / "2.7_80x80_MiniFASNetV2.onnx")
 LIVENESS_THRESHOLD = 0.5
 
-# ── Detección de lentes ──────────────────────────────────────────
-EYEGLASS_DETECTION_ENABLED = True
-EYEGLASS_THRESHOLD = 0.7
+# ── Detección de lentes ──────────────────────────────────────────────
+# Habilitar/deshabilitar detección de lentes
+EYEGLASS_DETECTION_ENABLED = os.getenv("EYEGLASS_DETECTION_ENABLED", "true").lower() == "true"
 
-# ── Gestos ─────────────────────────────────────────────────────────
+# Umbral para considerar que usa lentes (0.0 - 1.0)
+# Valores más altos = más estricto (menos falsos positivos)
+# Valores más bajos = más sensible (más falsos positivos)
+EYEGLASS_THRESHOLD = float(os.getenv("EYEGLASS_THRESHOLD", "0.7"))
+
+# Tamaño del caché de detecciones (número de imágenes almacenadas)
+EYEGLASS_CACHE_SIZE = int(os.getenv("EYEGLASS_CACHE_SIZE", "100"))
+
+# Tiempo de vida del caché en segundos
+EYEGLASS_CACHE_TTL = int(os.getenv("EYEGLASS_CACHE_TTL", "5"))
+
+# Tamaño del modelo: "small", "medium", "large"
+EYEGLASS_MODEL_SIZE = os.getenv("EYEGLASS_MODEL_SIZE", "small")
+
+# Tipo de lentes a detectar: "anyglasses", "sunglasses", "eyeglasses"
+EYEGLASS_KIND = os.getenv("EYEGLASS_KIND", "anyglasses")
+
+# Tiempo máximo de predicción en segundos (timeout)
+EYEGLASS_PREDICTION_TIMEOUT = float(os.getenv("EYEGLASS_PREDICTION_TIMEOUT", "1.0"))
+
+# ── Gestos ─────────────────────────────────────────────────────────────
 GESTOS_VALIDOS = {"arriba", "abajo", "izquierda", "derecha", "sonrisa"}
+
+# ── Configuración de logs ────────────────────────────────────────────
+LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO")
+LOG_FILE = os.getenv("LOG_FILE", "app.log")
+
+# ── Configuración de seguridad ───────────────────────────────────────
+MAX_LOGIN_ATTEMPTS = int(os.getenv("MAX_LOGIN_ATTEMPTS", "5"))
+BLOCK_TIME_MINUTES = int(os.getenv("BLOCK_TIME_MINUTES", "15"))
+
+# ── Configuración de calidad de imagen ──────────────────────────────
+MIN_FACE_QUALITY = float(os.getenv("MIN_FACE_QUALITY", "0.3"))
+MAX_FACE_QUALITY = float(os.getenv("MAX_FACE_QUALITY", "0.9"))
+
+# ── Configuración de caché de embeddings ────────────────────────────
+EMBEDDING_CACHE_SIZE = int(os.getenv("EMBEDDING_CACHE_SIZE", "1000"))
+EMBEDDING_CACHE_TTL = int(os.getenv("EMBEDDING_CACHE_TTL", "3600"))
+
+# ── Configuración de directorios ─────────────────────────────────────
+SUSPICIOUS_DIR = BASE_DIR / "sospechosas"
+TEMP_DIR = BASE_DIR / "temp"
+
+# Crear directorios si no existen
+SUSPICIOUS_DIR.mkdir(exist_ok=True)
+TEMP_DIR.mkdir(exist_ok=True)
