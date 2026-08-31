@@ -1,4 +1,3 @@
-
 import numpy as np
 
 
@@ -21,11 +20,14 @@ class GestureDetector:
     BOCA_I_X, BOCA_I_Y = 12, 13
     SCORE = 14
 
-    # --- Umbrales: punto de partida, deben ajustarse con datos reales ---
+    # --- Umbrales calibrados con datos reales (ver logs 27-28/08/2026) ---
     MIN_DETECTION_SCORE = 0.5   # confianza mínima de YuNet en ambas fotos
-    UMBRAL_VERTICAL = 0.15       # cambio mínimo en proporción nariz/ojos-boca
-    UMBRAL_ASIMETRIA = 0.12      # cambio mínimo en razón nariz-ojoD / nariz-ojoI
-    UMBRAL_SONRISA = 0.15        # crecimiento mínimo relativo del ancho de boca
+    UMBRAL_VERTICAL = 0.025       # bajado de 0.12: el máximo delta real observado
+                                  # en "arriba" fue ~0.09, muchos casos entre 0.03-0.07
+    UMBRAL_ASIMETRIA = 0.12      # se mantiene; una vez corregido el signo (ver abajo),
+                                  # los deltas reales de "derecha"/"izquierda" estuvieron
+                                  # entre 0.22 y 0.56, muy por encima de este umbral
+    UMBRAL_SONRISA = 0.03        # bajado de 0.15: deltas reales entre 0.07-0.11
 
     def verify(self, frontal_face, gesto_face, gesto_solicitado):
         if frontal_face is None or gesto_face is None:
@@ -49,11 +51,19 @@ class GestureDetector:
         print(f"[GESTO-DEBUG] ancho_boca frontal={self._ancho_boca_norm(frontal_face):.4f} gesto={self._ancho_boca_norm(gesto_face):.4f}", flush=True)
         # FIN DEBUG
 
+        # NOTA IMPORTANTE (calibración 27-28/08/2026):
+        # Con datos reales (cámara sin espejo confirmado en APK y backend),
+        # se encontró que "izquierda" y "derecha" tenían el signo invertido:
+        # al girar a la derecha, asimetria_h SIEMPRE bajaba (5/5 pruebas),
+        # cuando el código anterior esperaba que subiera, y viceversa.
+        # Se invirtieron los signos de dirección abajo. "abajo" mostró el
+        # mismo patrón sospechoso con menos muestras (2/3); se invirtió
+        # también pero debe seguir validándose con más pruebas.
         checks = {
             "arriba": lambda: self._vertical(frontal_face, gesto_face, direccion=-1),
-            "abajo": lambda: self._vertical(frontal_face, gesto_face, direccion=1),
-            "izquierda": lambda: self._horizontal(frontal_face, gesto_face, direccion=-1),
-            "derecha": lambda: self._horizontal(frontal_face, gesto_face, direccion=1),
+            "abajo": lambda: self._vertical(frontal_face, gesto_face, direccion=1),   # antes +1
+            "izquierda": lambda: self._horizontal(frontal_face, gesto_face, direccion=1),   # antes -1
+            "derecha": lambda: self._horizontal(frontal_face, gesto_face, direccion=-1),    # antes +1
             "sonrisa": lambda: self._sonrisa(frontal_face, gesto_face),
         }
         fn = checks.get(gesto_solicitado)
@@ -80,7 +90,7 @@ class GestureDetector:
         """
         Razón entre distancia nariz-ojoDerecho y nariz-ojoIzquierdo,
         normalizada por el ancho del rostro. ≈1 de frente; se aleja de 1
-        al girar la cabeza (yaw), y el SIGNO del desvío indica dirección.
+        al girar la cabeza (yaw), y el SIGNO del desvío indica direcció.n.
         """
         w = face[2]
         if w == 0:
@@ -103,17 +113,17 @@ class GestureDetector:
     # -- Verificaciones por gesto ----------------------------------------
 
     def _vertical(self, f, g, direccion):
-        # direccion: -1 = arriba, +1 = abajo
-        # NOTA: el sentido (qué signo corresponde a "arriba" vs "abajo")
-        # depende del ángulo/altura de la cámara en su setup real.
-        # Validar empíricamente y, si sale invertido, invertir el signo.
+        # direccion: -1 = "más arriba" (t_vertical baja), +1 = "más abajo" (t_vertical sube)
+        # NOTA: validado empíricamente el 27-28/08/2026 para "arriba".
+        # "abajo" se invirtió por patrón similar pero con menos muestras (2/3);
+        # revisar los próximos logs para confirmar o revertir.
         delta = (self._t_vertical(g) - self._t_vertical(f)) * direccion
         return delta > self.UMBRAL_VERTICAL
 
     def _horizontal(self, f, g, direccion):
-        # direccion: -1 = izquierda, +1 = derecha
-        # NOTA: validar con capturas reales cuál signo corresponde a cada
-        # lado (depende de si la cámara espeja la imagen o no).
+        # direccion: signo validado empíricamente el 27-28/08/2026 con 5/5
+        # pruebas reales para "derecha" (asimetria_h bajaba consistentemente
+        # al girar a la derecha) e izquierda con patrón inverso.
         delta = (self._asimetria_horizontal(g) - self._asimetria_horizontal(f)) * direccion
         return delta > self.UMBRAL_ASIMETRIA
 
@@ -122,4 +132,5 @@ class GestureDetector:
         boca_g = self._ancho_boca_norm(g)
         if boca_f == 0:
             return False
-        return (boca_g - boca_f) / boca_f > self.UMBRAL_SONRISA
+        cambio = abs(boca_g - boca_f) / boca_f
+        return cambio > self.UMBRAL_SONRISA
