@@ -128,9 +128,21 @@ class GestureDetector:
         return delta > self.UMBRAL_ASIMETRIA
 
     def _sonrisa(self, f, g):
+        """
+        Verifica que la boca se ENSANCHE en la foto de gesto.
+        Una sonrisa real aumenta el ancho de la boca.
+        """
         boca_f = self._ancho_boca_norm(f)
         boca_g = self._ancho_boca_norm(g)
+        
         if boca_f == 0:
             return False
-        cambio = abs(boca_g - boca_f) / boca_f
+        
+        # Cambio relativo (positivo = ensancha, negativo = estrecha)
+        cambio = (boca_g - boca_f) / boca_f
+        
+        # DEBUG
+        print(f"[GESTO-DEBUG] sonrisa: boca_f={boca_f:.4f} boca_g={boca_g:.4f} cambio={cambio:.4f} umbral={self.UMBRAL_SONRISA}", flush=True)
+        
+        # Solo aceptar si la boca se ENSANCHA más que el umbral
         return cambio > self.UMBRAL_SONRISA

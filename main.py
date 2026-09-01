@@ -175,19 +175,39 @@ def verify(
     """Verifica un rostro contra los embeddings de una persona."""
     start = time.time()
 
-    # Validar persona
+    # ══════════════════════════════════════════════════════════════
+    # PASO 1: Validar persona y CI
+    # ══════════════════════════════════════════════════════════════
     persona = db.get_persona_by_id(persona_id)
     if not persona or persona["ci"] != ci:
+        print(f"[VERIFY] Persona no encontrada o CI no coincide (persona_id={persona_id})", flush=True)
         return {"match": False, "resultado": "desconocido", "message": "Persona no encontrada o CI no coincide."}
 
+    # ══════════════════════════════════════════════════════════════
+    # PASO 2: Validar embeddings mínimos
+    # ══════════════════════════════════════════════════════════════
     total = db.count_embeddings(persona_id)
     if total < MIN_EMBEDDINGS_REQUIRED:
+        print(f"[VERIFY] Registro incompleto: {total}/{MIN_EMBEDDINGS_REQUIRED}", flush=True)
         return {"match": False, "resultado": "desconocido", "message": f"Registro facial incompleto. Tiene {total} de {MIN_EMBEDDINGS_REQUIRED}."}
 
+    # ══════════════════════════════════════════════════════════════
+    # PASO 3: Validar gesto solicitado
+    # ══════════════════════════════════════════════════════════════
+    if gesto_solicitado not in GESTOS_VALIDOS:
+        print(f"[VERIFY] Gesto solicitado inválido: {gesto_solicitado}", flush=True)
+        return {"match": False, "resultado": "desconocido", "message": "Gesto no válido."}
+
+    # ══════════════════════════════════════════════════════════════
+    # PASO 4: Procesar foto_frontal
+    # ══════════════════════════════════════════════════════════════
     if foto_frontal.content_type not in ("image/jpeg", "image/png", "image/jpg"):
         raise HTTPException(400, "Formato de imagen no válido.")
 
     contents = foto_frontal.file.read()
+    if len(contents) > MAX_IMAGE_BYTES:
+        raise HTTPException(413, "Imagen demasiado grande. Máximo 5MB.")
+
     try:
         pil_img = Image.open(BytesIO(contents))
         pil_img.verify()
@@ -201,18 +221,44 @@ def verify(
     except Exception:
         raise HTTPException(400, "No se pudo procesar la imagen.")
 
+    # ══════════════════════════════════════════════════════════════
+    # PASO 5: Detectar rostro en foto_frontal
+    # ══════════════════════════════════════════════════════════════
     faces = detector.detect(frame)
     if faces is None:
-        db.save_log(persona_id, 0, "desconocido")
+        print("[VERIFY] No se detectó rostro en foto frontal", flush=True)
+        db.save_log(persona_id, 0, "desconocido", ip_origen=request.client.host)
         return {"match": False, "resultado": "desconocido", "message": "No se detectó rostro."}
 
     if len(faces) > 1:
-        db.save_log(persona_id, 0, "desconocido")
+        print(f"[VERIFY] Múltiples rostros en foto frontal: {len(faces)}", flush=True)
+        db.save_log(persona_id, 0, "desconocido", ip_origen=request.client.host)
         return {"match": False, "resultado": "desconocido", "message": "Múltiples rostros detectados."}
 
     face_info = faces[0]
 
+    # ══════════════════════════════════════════════════════════════
+    # PASO 6: Verificar LENTES en foto_frontal
+    # ══════════════════════════════════════════════════════════════
+    print("[VERIFY] Paso 1: Verificando lentes en foto frontal...", flush=True)
+    has_eyeglass = eyeglass_detector.detect(frame, face_info)
+    print(f"[VERIFY] Resultado lentes frontal: {has_eyeglass}", flush=True)
+
+    if has_eyeglass:
+        return {
+            "match": False,
+            "resultado": "desconocido",
+            "message": "Por favor, quítese las gafas para la verificación.",
+            "eyeglass_detected": True
+        }
+
+    # ══════════════════════════════════════════════════════════════
+    # PASO 7: Verificar LIVENESS en foto_frontal
+    # ══════════════════════════════════════════════════════════════
+    print("[VERIFY] Paso 2: Verificando liveness en foto frontal...", flush=True)
     live_result = liveness.predict(frame, face_info)
+    print(f"[VERIFY] Resultado liveness frontal: is_real={live_result['is_real']} score={live_result['score']:.4f}", flush=True)
+
     if not live_result["is_real"]:
         from pathlib import Path
         from datetime import datetime
@@ -222,18 +268,59 @@ def verify(
         cv2.imwrite(filename, frame)
 
         db.save_log(persona_id, 0, "spoofing_detectado", liveness_score=live_result["score"], ip_origen=request.client.host)
-        return {"match": False, "resultado": "spoofing_detectado", "message": "Posible suplantación detectada.", "liveness_score": live_result["score"]}
+        return {
+            "match": False,
+            "resultado": "spoofing_detectado",
+            "message": "Posible suplantación detectada.",
+            "liveness_score": live_result["score"]
+        }
 
-    # Verificar lentes
-    print("[MAIN] Chequeando lentes...", flush=True)
-    has_eyeglass = eyeglass_detector.detect(frame, face_info)
-    print(f"[MAIN] Resultado lentes: {has_eyeglass}", flush=True)
+    # ══════════════════════════════════════════════════════════════
+    # PASO 8: Generar embedding + COMPARAR identidad
+    # ══════════════════════════════════════════════════════════════
+    print("[VERIFY] Paso 3: Generando embedding y comparando identidad...", flush=True)
+    try:
+        embedding = embedder.extract(frame, face_info)
+    except Exception as e:
+        print(f"[VERIFY] Error al extraer embedding: {e}", flush=True)
+        db.save_log(persona_id, 0, "error_embedding", ip_origen=request.client.host)
+        return {"match": False, "resultado": "desconocido", "message": "Error al procesar la imagen."}
 
-    if has_eyeglass:
-        return {"success": False, "message": "Por favor, quítese las gafas para el registro.", "eyeglass_detected": True}
+    embeddings = db.get_embeddings_by_persona(persona_id)
+    if not embeddings:
+        print("[VERIFY] No hay embeddings registrados para esta persona", flush=True)
+        db.save_log(persona_id, 0, "desconocido", ip_origen=request.client.host)
+        return {"match": False, "resultado": "desconocido", "message": "No hay embeddings registrados."}
 
-    # Procesar foto_gesto
+    result = find_best_match(embedding, embeddings)
+    print(f"[VERIFY] Comparación identidad: match={result['match']} confidence={result['confidence']:.2f}%", flush=True)
+
+    if not result["match"]:
+        tiempo_ms = int((time.time() - start) * 1000)
+        db.save_log(persona_id, result["confidence"], "desconocido", tiempo_proceso_ms=tiempo_ms, ip_origen=request.client.host)
+        print(f"[VERIFY] ❌ Identidad NO verificada: {result['confidence']:.2f}%", flush=True)
+        return {
+            "match": False,
+            "resultado": "desconocido",
+            "confianza": result["confidence"],
+            "message": "No se pudo verificar la identidad.",
+            "tiempo_proceso_ms": tiempo_ms
+        }
+
+    print(f"[VERIFY] ✅ Identidad verificada: {result['confidence']:.2f}%", flush=True)
+
+    # ══════════════════════════════════════════════════════════════
+    # PASO 9: Procesar foto_gesto
+    # ══════════════════════════════════════════════════════════════
+    print("[VERIFY] Paso 4: Procesando foto de gesto...", flush=True)
+
+    if foto_gesto.content_type not in ("image/jpeg", "image/png", "image/jpg"):
+        raise HTTPException(400, "Formato de imagen no válido.")
+
     contents_gesto = foto_gesto.file.read()
+    if len(contents_gesto) > MAX_IMAGE_BYTES:
+        raise HTTPException(413, "Imagen demasiado grande. Máximo 5MB.")
+
     try:
         pil_gesto = Image.open(BytesIO(contents_gesto))
         pil_gesto.verify()
@@ -246,18 +333,31 @@ def verify(
     except Exception:
         raise HTTPException(400, "No se pudo procesar la foto de gesto.")
 
-    # Detectar rostro en foto_gesto
+    # ══════════════════════════════════════════════════════════════
+    # PASO 10: Detectar rostro en foto_gesto
+    # ══════════════════════════════════════════════════════════════
     faces_gesto = detector.detect(frame_gesto)
     if faces_gesto is None:
+        print("[VERIFY] No se detectó rostro en foto de gesto", flush=True)
         db.save_log(persona_id, 0, "desconocido", ip_origen=request.client.host)
         return {"match": False, "resultado": "desconocido", "message": "No se detectó rostro en foto de gesto."}
 
-    # Verificar liveness en foto_gesto
-    live_result_gesto = liveness.predict(frame_gesto, faces_gesto[0])
+    if len(faces_gesto) > 1:
+        print(f"[VERIFY] Múltiples rostros en foto de gesto: {len(faces_gesto)}", flush=True)
+        db.save_log(persona_id, 0, "desconocido", ip_origen=request.client.host)
+        return {"match": False, "resultado": "desconocido", "message": "Múltiples rostros en foto de gesto."}
+
+    face_gesto_info = faces_gesto[0]
+
+    # ══════════════════════════════════════════════════════════════
+    # PASO 11: Verificar LIVENESS en foto_gesto
+    # ══════════════════════════════════════════════════════════════
+    print("[VERIFY] Paso 5: Verificando liveness en foto gesto...", flush=True)
+    live_result_gesto = liveness.predict(frame_gesto, face_gesto_info)
+    print(f"[VERIFY] Resultado liveness gesto: is_real={live_result_gesto['is_real']} score={live_result_gesto['score']:.4f}", flush=True)
+
     if not live_result_gesto["is_real"]:
-        db.save_log(persona_id, 0, "spoofing_detectado",
-                    liveness_score=live_result_gesto["score"],
-                    ip_origen=request.client.host)
+        db.save_log(persona_id, 0, "spoofing_detectado", liveness_score=live_result_gesto["score"], ip_origen=request.client.host)
         return {
             "match": False,
             "resultado": "spoofing_detectado",
@@ -265,41 +365,53 @@ def verify(
             "liveness_score": live_result_gesto["score"]
         }
 
-    # Verificar gesto
-    print(f"[MAIN] Verificando gesto: {gesto_solicitado}...", flush=True)
-    gesto_ok = gesture_detector.verify(faces[0], faces_gesto[0], gesto_solicitado)
-    print(f"[MAIN] Resultado gesto: {gesto_ok}", flush=True)
+    # ══════════════════════════════════════════════════════════════
+    # PASO 12: Verificar LENTES en foto_gesto
+    # ══════════════════════════════════════════════════════════════
+    print("[VERIFY] Paso 6: Verificando lentes en foto gesto...", flush=True)
+    has_eyeglass_gesto = eyeglass_detector.detect(frame_gesto, face_gesto_info)
+    print(f"[VERIFY] Resultado lentes gesto: {has_eyeglass_gesto}", flush=True)
+
+    if has_eyeglass_gesto:
+        return {
+            "match": False,
+            "resultado": "desconocido",
+            "message": "Por favor, quítese las gafas para la verificación.",
+            "eyeglass_detected": True
+        }
+
+    # ══════════════════════════════════════════════════════════════
+    # PASO 13: Verificar GESTO
+    # ══════════════════════════════════════════════════════════════
+    print(f"[VERIFY] Paso 7: Verificando gesto solicitado: {gesto_solicitado}...", flush=True)
+    gesto_ok = gesture_detector.verify(face_info, face_gesto_info, gesto_solicitado)
+    print(f"[VERIFY] Resultado gesto: {gesto_ok}", flush=True)
 
     if not gesto_ok:
-        db.save_log(persona_id, 0, "spoofing_detectado", ip_origen=request.client.host)
-        return {"match": False, "resultado": "spoofing_detectado", "message": "El gesto no coincide.", "gesture_detected": False}
+        db.save_log(persona_id, 0, "gesto_no_coincide", ip_origen=request.client.host)
+        return {
+            "match": False,
+            "resultado": "gesto_no_coincide",
+            "message": f"El gesto '{gesto_solicitado}' no coincide. Por favor, realice el gesto solicitado.",
+            "gesture_detected": False
+        }
 
-    try:
-        embedding = embedder.extract(frame, face_info)
-
-    
-    except Exception as e:
-        return {"match": False, "resultado": "desconocido", "message": str(e)}
-
-    embeddings = db.get_embeddings_by_persona(persona_id)
-
-    if not embeddings:
-        db.save_log(persona_id, 0, "desconocido")
-        return {"match": False, "resultado": "desconocido", "message": "No hay embeddings registrados."}
-
-    result = find_best_match(embedding, embeddings)
+    # ══════════════════════════════════════════════════════════════
+    # PASO 14: CORRECTO
+    # ══════════════════════════════════════════════════════════════
     tiempo_ms = int((time.time() - start) * 1000)
-    resultado = "reconocido" if result["match"] else "desconocido"
+    resultado = "reconocido"
 
     db.save_log(persona_id, result["confidence"], resultado, tiempo_proceso_ms=tiempo_ms, ip_origen=request.client.host)
 
+    print(f"[VERIFY] ✅ Verificación exitosa: {result['confidence']:.2f}% en {tiempo_ms}ms", flush=True)
+
     return {
-        "match": result["match"],
+        "match": True,
         "resultado": resultado,
         "confianza": result["confidence"],
         "tiempo_proceso_ms": tiempo_ms
     }
-
 
 @app.get("/status/{persona_id}")
 def status(persona_id: int):
