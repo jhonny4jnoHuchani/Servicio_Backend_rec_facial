@@ -215,11 +215,15 @@ def get_reconocimiento_status(persona_id: int) -> dict:
 
 # ── Log ───────────────────────────────────────────────────────────
 
+# ✅ DESPUÉS
 def save_log(persona_id: int, confianza: float, resultado: str,
              liveness_score: float = None, ip_origen: str = None,
              tiempo_proceso_ms: int = None, imagen_captura: str = None,
-             dispositivo_id: str = None):
-    """Registra intento de verificación en log_reconocimiento"""
+             dispositivo_id: str = None) -> int:
+    """
+    Registra intento de verificación en log_reconocimiento.
+    Retorna el ID del log creado.
+    """
     conn = get_connection()
     try:
         with conn.cursor() as cur:
@@ -228,9 +232,12 @@ def save_log(persona_id: int, confianza: float, resultado: str,
                 (persona_id, confianza, resultado, liveness_score, ip_origen,
                  dispositivo_id, imagen_captura, tiempo_proceso_ms, created_at, updated_at)
                 VALUES (%s, %s, %s, %s, %s, %s, %s, %s, NOW(), NOW())
+                RETURNING id
             """, (persona_id, confianza, resultado, liveness_score, ip_origen,
                   dispositivo_id, imagen_captura, tiempo_proceso_ms))
+            log_id = cur.fetchone()[0]
         conn.commit()
+        return log_id
     except Exception:
         conn.rollback()
         raise

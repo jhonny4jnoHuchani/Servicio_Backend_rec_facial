@@ -97,3 +97,16 @@ TEMP_DIR = BASE_DIR / "temp"
 # Crear directorios si no existen
 SUSPICIOUS_DIR.mkdir(exist_ok=True)
 TEMP_DIR.mkdir(exist_ok=True)
+
+# ── Configuración de capturas ─────────────────────────────────────
+# Habilitar/deshabilitar guardado de capturas
+SAVE_CAPTURES_ENABLED = os.getenv("SAVE_CAPTURES_ENABLED", "true").lower() == "true"
+
+# Guardar capturas de verificaciones exitosas (reconocido)
+SAVE_RECONOCIDO = os.getenv("SAVE_RECONOCIDO", "true").lower() == "true"
+
+# Directorio de capturas
+CAPTURES_DIR = BASE_DIR / "capturas"
+
+# Crear directorio si no existe
+CAPTURES_DIR.mkdir(exist_ok=True)
