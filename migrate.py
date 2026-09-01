@@ -62,7 +62,7 @@ CREATE TABLE IF NOT EXISTS log_reconocimiento (
     tiempo_proceso_ms   SMALLINT,
     created_at          TIMESTAMP(0),
     updated_at          TIMESTAMP(0),
-    CONSTRAINT chk_resultado CHECK (resultado IN ('reconocido','desconocido','spoofing_detectado')),
+    CONSTRAINT chk_resultado CHECK (resultado IN ('reconocido','desconocido','spoofing_detectado','gesto_no_coincide','error_embedding')),
     CONSTRAINT fk_log_persona
         FOREIGN KEY (persona_id) REFERENCES persona(id)
         ON DELETE SET NULL
