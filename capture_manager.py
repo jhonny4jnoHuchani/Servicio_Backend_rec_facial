@@ -13,7 +13,7 @@ from config import CAPTURES_DIR, SAVE_CAPTURES_ENABLED, SAVE_RECONOCIDO
 class CaptureManager:
     """
     Gestiona el guardado de imágenes de verificación.
-    Estructura: capturas/{CI}/{fecha_dd-mm-aaaa_Día}/{tipo}_{resultado}_{hora}.jpg
+    Estructura: capturas/{CI}/{fecha_dd-mm-aaaa_Día}/{tipo}_{resultado}_{hora}.webp
     """
     
     # Mapeo de resultado → nombre para el archivo
@@ -30,10 +30,10 @@ class CaptureManager:
     DIAS_SEMANA = {
         0: "Lunes",
         1: "Martes",
-        2: "Miércoles",
+        2: "Miercoles",  
         3: "Jueves",
         4: "Viernes",
-        5: "Sábado",
+        5: "Sabado", 
         6: "Domingo"
     }
     
@@ -96,13 +96,13 @@ class CaptureManager:
         resultado_nombre = self.RESULTADOS.get(resultado, "error")
         
         # Generar nombre del archivo (sin marcado_id)
-        filename = f"{tipo_marcado}_{resultado_nombre}_{hora_archivo}.jpg"
+        filename = f"{tipo_marcado}_{resultado_nombre}_{hora_archivo}.webp"
         
         filepath = dir_path / filename
         
         # Guardar imagen
         try:
-            cv2.imwrite(str(filepath), frame)
+            cv2.imwrite(str(filepath), frame, [cv2.IMWRITE_WEBP_QUALITY, 80])
             # Retornar ruta relativa (para guardar en BD)
             ruta_relativa = str(filepath.relative_to(self.base_dir))
             print(f"[CAPTURE] Imagen guardada: {ruta_relativa}", flush=True)
