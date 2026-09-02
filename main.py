@@ -232,17 +232,17 @@ def verify(
     if faces is None:
         print("[VERIFY] No se detectó rostro en foto frontal", flush=True)
         ruta_img = capture_manager.save(frame, ci, "error", tipo_marcado)
-        db.save_log(persona_id, 0, "desconocido", ip_origen=request.client.host,
+        log_id = db.save_log(persona_id, 0, "desconocido", ip_origen=request.client.host,
                 imagen_captura=ruta_img)
-        return {"match": False, "resultado": "desconocido", "message": "No se detectó rostro."}
+        return {"match": False, "resultado": "desconocido", "message": "No se detectó rostro.", "log_id": log_id}
 
 
     if len(faces) > 1:
         print(f"[VERIFY] Múltiples rostros en foto frontal: {len(faces)}", flush=True)
         ruta_img = capture_manager.save(frame, ci, "error", tipo_marcado)
-        db.save_log(persona_id, 0, "desconocido", ip_origen=request.client.host,
+        log_id = db.save_log(persona_id, 0, "desconocido", ip_origen=request.client.host,
                 imagen_captura=ruta_img)
-        return {"match": False, "resultado": "desconocido", "message": "Múltiples rostros detectados."}
+        return {"match": False, "resultado": "desconocido", "message": "Múltiples rostros detectados.", "log_id": log_id}
 
 
     face_info = faces[0]
@@ -275,7 +275,7 @@ def verify(
 
     if not live_result["is_real"]:
         ruta_img = capture_manager.save(frame, ci, "spoofing_detectado", tipo_marcado)
-        db.save_log(persona_id, 0, "spoofing_detectado",
+        log_id = db.save_log(persona_id, 0, "spoofing_detectado",
                 liveness_score=live_result["score"],
                 ip_origen=request.client.host,
                 imagen_captura=ruta_img)
@@ -283,7 +283,8 @@ def verify(
             "match": False,
             "resultado": "spoofing_detectado",
             "message": "Posible suplantación detectada.",
-            "liveness_score": live_result["score"]
+            "liveness_score": live_result["score"],
+            "log_id": log_id
         }
     
 
@@ -298,9 +299,9 @@ def verify(
     except Exception as e:
         print(f"[VERIFY] Error al extraer embedding: {e}", flush=True)
         ruta_img = capture_manager.save(frame, ci, "error", tipo_marcado)
-        db.save_log(persona_id, 0, "error_embedding", ip_origen=request.client.host,
+        log_id = db.save_log(persona_id, 0, "error_embedding", ip_origen=request.client.host,
                 imagen_captura=ruta_img)
-        return {"match": False, "resultado": "desconocido", "message": "Error al procesar la imagen."}
+        return {"match": False, "resultado": "desconocido", "message": "Error al procesar la imagen.", "log_id": log_id}
 
 
 
@@ -310,9 +311,9 @@ def verify(
     if not embeddings:
         print("[VERIFY] No hay embeddings registrados para esta persona", flush=True)
         ruta_img = capture_manager.save(frame, ci, "error", tipo_marcado)
-        db.save_log(persona_id, 0, "desconocido", ip_origen=request.client.host,
+        log_id = db.save_log(persona_id, 0, "desconocido", ip_origen=request.client.host,
                 imagen_captura=ruta_img)
-        return {"match": False, "resultado": "desconocido", "message": "No hay embeddings registrados."}
+        return {"match": False, "resultado": "desconocido", "message": "No hay embeddings registrados.", "log_id": log_id}
 
     result = find_best_match(embedding, embeddings)
     print(f"[VERIFY] Comparación identidad: match={result['match']} confidence={result['confidence']:.2f}%", flush=True)
@@ -367,16 +368,16 @@ def verify(
     if faces_gesto is None:
         print("[VERIFY] No se detectó rostro en foto de gesto", flush=True)
         ruta_img = capture_manager.save(frame_gesto, ci, "error", tipo_marcado)
-        db.save_log(persona_id, 0, "desconocido", ip_origen=request.client.host,
+        log_id = db.save_log(persona_id, 0, "desconocido", ip_origen=request.client.host,
                 imagen_captura=ruta_img)
-        return {"match": False, "resultado": "desconocido", "message": "No se detectó rostro en foto de gesto."}
+        return {"match": False, "resultado": "desconocido", "message": "No se detectó rostro en foto de gesto.", "log_id": log_id}
 
     if len(faces_gesto) > 1:
         print(f"[VERIFY] Múltiples rostros en foto de gesto: {len(faces_gesto)}", flush=True)
         ruta_img = capture_manager.save(frame_gesto, ci, "error", tipo_marcado)
-        db.save_log(persona_id, 0, "desconocido", ip_origen=request.client.host,
+        log_id = db.save_log(persona_id, 0, "desconocido", ip_origen=request.client.host,
                 imagen_captura=ruta_img)
-        return {"match": False, "resultado": "desconocido", "message": "Múltiples rostros en foto de gesto."}
+        return {"match": False, "resultado": "desconocido", "message": "Múltiples rostros en foto de gesto.", "log_id": log_id}
     face_gesto_info = faces_gesto[0]
 
     # ══════════════════════════════════════════════════════════════
