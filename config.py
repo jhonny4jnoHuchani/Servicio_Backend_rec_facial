@@ -110,3 +110,9 @@ CAPTURES_DIR = BASE_DIR / "capturas"
 
 # Crear directorio si no existe
 CAPTURES_DIR.mkdir(exist_ok=True)
+
+# ── Seguridad ─────────────────────────────────────────────────────
+API_KEY = os.getenv("API_KEY", "")
+
+# IPs permitidas (separadas por coma, vacío = todas)
+# ALLOWED_IPS = [ip.strip() for ip in os.getenv("ALLOWED_IPS", "").split(",") if ip.strip()]  # ← Descomentar cuando se implemente IP
