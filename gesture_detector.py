@@ -1,4 +1,7 @@
 import numpy as np
+import logging
+
+logger = logging.getLogger(__name__)
 
 
 class GestureDetector:
@@ -22,11 +25,9 @@ class GestureDetector:
 
     # --- Umbrales calibrados con datos reales (ver logs 27-28/08/2026) ---
     MIN_DETECTION_SCORE = 0.5   # confianza mínima de YuNet en ambas fotos
-    UMBRAL_VERTICAL = 0.025       # bajado de 0.12: el máximo delta real observado
-                                  # en "arriba" fue ~0.09, muchos casos entre 0.03-0.07
-    UMBRAL_ASIMETRIA = 0.12      # se mantiene; una vez corregido el signo (ver abajo),
-                                  # los deltas reales de "derecha"/"izquierda" estuvieron
-                                  # entre 0.22 y 0.56, muy por encima de este umbral
+    UMBRAL_ARRIBA = 0.005       # Validar simplemente la 'diferencia absoluta' con la foto frontal
+    UMBRAL_ABAJO = 0.012        # La variación vertical hacia abajo es más pronunciada (deltas >0.04)
+    UMBRAL_ASIMETRIA = 0.12     # se mantiene
     UMBRAL_SONRISA = 0.03        # bajado de 0.15: deltas reales entre 0.07-0.11
 
     def verify(self, frontal_face, gesto_face, gesto_solicitado):
@@ -41,29 +42,21 @@ class GestureDetector:
         # Landmarks poco confiables (blur, ángulo extremo, etc.) -> no decidir
         if frontal_face[self.SCORE] < self.MIN_DETECTION_SCORE or \
         gesto_face[self.SCORE] < self.MIN_DETECTION_SCORE:
-            print(f"[GESTO-DEBUG] Score bajo: frontal={frontal_face[self.SCORE]:.4f} gesto={gesto_face[self.SCORE]:.4f}", flush=True)
+            logger.info(f"[GESTO-DEBUG] Score bajo: frontal={frontal_face[self.SCORE]:.4f} gesto={gesto_face[self.SCORE]:.4f}")
             return False
 
         # DEBUG temporal
-        print(f"[GESTO-DEBUG] solicitado={gesto_solicitado}", flush=True)
-        print(f"[GESTO-DEBUG] t_vertical frontal={self._t_vertical(frontal_face):.4f} gesto={self._t_vertical(gesto_face):.4f}", flush=True)
-        print(f"[GESTO-DEBUG] asimetria_h frontal={self._asimetria_horizontal(frontal_face):.4f} gesto={self._asimetria_horizontal(gesto_face):.4f}", flush=True)
-        print(f"[GESTO-DEBUG] ancho_boca frontal={self._ancho_boca_norm(frontal_face):.4f} gesto={self._ancho_boca_norm(gesto_face):.4f}", flush=True)
+        logger.info(f"[GESTO-DEBUG] solicitado={gesto_solicitado}")
+        logger.info(f"[GESTO-DEBUG] t_vertical frontal={self._t_vertical(frontal_face):.4f} gesto={self._t_vertical(gesto_face):.4f}")
+        logger.info(f"[GESTO-DEBUG] asimetria_h frontal={self._asimetria_horizontal(frontal_face):.4f} gesto={self._asimetria_horizontal(gesto_face):.4f}")
+        logger.info(f"[GESTO-DEBUG] ancho_boca frontal={self._ancho_boca_norm(frontal_face):.4f} gesto={self._ancho_boca_norm(gesto_face):.4f}")
         # FIN DEBUG
 
-        # NOTA IMPORTANTE (calibración 27-28/08/2026):
-        # Con datos reales (cámara sin espejo confirmado en APK y backend),
-        # se encontró que "izquierda" y "derecha" tenían el signo invertido:
-        # al girar a la derecha, asimetria_h SIEMPRE bajaba (5/5 pruebas),
-        # cuando el código anterior esperaba que subiera, y viceversa.
-        # Se invirtieron los signos de dirección abajo. "abajo" mostró el
-        # mismo patrón sospechoso con menos muestras (2/3); se invirtió
-        # también pero debe seguir validándose con más pruebas.
         checks = {
             "arriba": lambda: self._vertical(frontal_face, gesto_face, direccion=-1),
-            "abajo": lambda: self._vertical(frontal_face, gesto_face, direccion=1),   # antes +1
-            "izquierda": lambda: self._horizontal(frontal_face, gesto_face, direccion=1),   # antes -1
-            "derecha": lambda: self._horizontal(frontal_face, gesto_face, direccion=-1),    # antes +1
+            "abajo": lambda: self._vertical(frontal_face, gesto_face, direccion=1),    # <-- Corregido a +1 (al mirar abajo, la distancia de ojos a nariz crece)
+            "izquierda": lambda: self._horizontal(frontal_face, gesto_face, direccion=1),
+            "derecha": lambda: self._horizontal(frontal_face, gesto_face, direccion=-1),
             "sonrisa": lambda: self._sonrisa(frontal_face, gesto_face),
         }
         fn = checks.get(gesto_solicitado)
@@ -113,18 +106,28 @@ class GestureDetector:
     # -- Verificaciones por gesto ----------------------------------------
 
     def _vertical(self, f, g, direccion):
-        # direccion: -1 = "más arriba" (t_vertical baja), +1 = "más abajo" (t_vertical sube)
-        # NOTA: validado empíricamente el 27-28/08/2026 para "arriba".
-        # "abajo" se invirtió por patrón similar pero con menos muestras (2/3);
-        # revisar los próximos logs para confirmar o revertir.
-        delta = (self._t_vertical(g) - self._t_vertical(f)) * direccion
-        return delta > self.UMBRAL_VERTICAL
+        t_vert_f = self._t_vertical(f)
+        t_vert_g = self._t_vertical(g)
+        
+        if direccion == -1: # ARRIBA
+            # Solo pedimos diferencia absoluta (positiva). Supera distorsiones de la webcam.
+            delta = abs(t_vert_g - t_vert_f)
+            umbral_aplicado = self.UMBRAL_ARRIBA
+        else: # ABAJO
+            delta = (t_vert_g - t_vert_f) * direccion
+            umbral_aplicado = self.UMBRAL_ABAJO
+        
+        logger.info(f"[GESTO-DEBUG] _vertical (dir={direccion}): frontal={t_vert_f:.4f}, gesto={t_vert_g:.4f}, delta abs/rel={delta:.4f}, umbral={umbral_aplicado}")
+        return delta > umbral_aplicado
 
     def _horizontal(self, f, g, direccion):
         # direccion: signo validado empíricamente el 27-28/08/2026 con 5/5
         # pruebas reales para "derecha" (asimetria_h bajaba consistentemente
         # al girar a la derecha) e izquierda con patrón inverso.
-        delta = (self._asimetria_horizontal(g) - self._asimetria_horizontal(f)) * direccion
+        asim_f = self._asimetria_horizontal(f)
+        asim_g = self._asimetria_horizontal(g)
+        delta = (asim_g - asim_f) * direccion
+        logger.info(f"[GESTO-DEBUG] _horizontal (dir={direccion}): frontal={asim_f:.4f}, gesto={asim_g:.4f}, delta={delta:.4f}, umbral={self.UMBRAL_ASIMETRIA}")
         return delta > self.UMBRAL_ASIMETRIA
 
     def _sonrisa(self, f, g):
@@ -142,7 +145,7 @@ class GestureDetector:
         cambio = (boca_g - boca_f) / boca_f
         
         # DEBUG
-        print(f"[GESTO-DEBUG] sonrisa: boca_f={boca_f:.4f} boca_g={boca_g:.4f} cambio={cambio:.4f} umbral={self.UMBRAL_SONRISA}", flush=True)
+        logger.info(f"[GESTO-DEBUG] sonrisa: boca_f={boca_f:.4f} boca_g={boca_g:.4f} cambio={cambio:.4f} umbral={self.UMBRAL_SONRISA}")
         
         # Solo aceptar si la boca se ENSANCHA más que el umbral
         return cambio > self.UMBRAL_SONRISA
